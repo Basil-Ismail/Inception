@@ -17,4 +17,6 @@ re: down up
 
 hardre: fclean all 
 
-.PHONY: down up fclean all re
+logs:
+	$(DC) -f $(COMPOSEPATH) logs -f 
+.PHONY: down up fclean all re hardre logs
