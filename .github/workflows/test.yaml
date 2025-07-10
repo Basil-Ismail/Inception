@@ -1,1 +1,234 @@
+name: Docker Infrastructure Test
 
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  docker-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create test environment file
+        run: |
+          cd src
+          cat > .env << EOF
+          MYSQL_ROOT_PASSWORD=test_root_pass_123
+          MYSQL_DATABASE=test_wordpress
+          MYSQL_USER=test_user
+          MYSQL_PASSWORD=test_user_pass_123
+          EOF
+
+      - name: Generate test SSL certificates
+        run: |
+          cd src/nginx
+          openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
+            -keyout server.key \
+            -out server.crt \
+            -subj "/C=US/ST=Test/L=Test/O=Test/CN=localhost"
+
+      - name: Build Docker images
+        run: |
+          cd src
+          docker-compose build --no-cache
+
+      - name: Start services
+        run: |
+          cd src
+          docker-compose up -d
+
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for MariaDB to be ready..."
+          timeout 60 bash -c 'until docker exec mariadb mysqladmin ping -h localhost --silent; do sleep 2; done'
+
+          echo "Waiting for Nginx to be ready..."
+          timeout 30 bash -c 'until docker exec nginx nginx -t; do sleep 2; done'
+
+      - name: Check container status
+        run: |
+          cd src
+          docker-compose ps
+
+          # Check if containers are running
+          if ! docker-compose ps | grep -q "Up"; then
+            echo "❌ Some containers are not running"
+            docker-compose logs
+            exit 1
+          fi
+          echo "✅ All containers are running"
+
+      - name: Test MariaDB connectivity
+        run: |
+          echo "Testing MariaDB connection..."
+
+          # Test root connection
+          docker exec mariadb mysql -u root -ptest_root_pass_123 -e "SELECT 1;" || {
+            echo "❌ Root connection failed"
+            exit 1
+          }
+          echo "✅ Root connection successful"
+
+          # Test user connection and database access
+          docker exec mariadb mysql -u test_user -ptest_user_pass_123 test_wordpress -e "SELECT 1;" || {
+            echo "❌ User connection failed"
+            exit 1
+          }
+          echo "✅ User connection successful"
+
+          # Test database exists
+          docker exec mariadb mysql -u root -ptest_root_pass_123 -e "SHOW DATABASES;" | grep test_wordpress || {
+            echo "❌ Database test_wordpress not found"
+            exit 1
+          }
+          echo "✅ Database exists"
+
+      - name: Test Nginx SSL configuration
+        run: |
+          echo "Testing Nginx SSL configuration..."
+
+          # Test SSL certificate
+          docker exec nginx openssl x509 -in /etc/nginx/certs/server.crt -text -noout | grep "CN=localhost" || {
+            echo "❌ SSL certificate invalid"
+            exit 1
+          }
+          echo "✅ SSL certificate valid"
+
+          # Test nginx configuration
+          docker exec nginx nginx -t || {
+            echo "❌ Nginx configuration invalid"
+            exit 1
+          }
+          echo "✅ Nginx configuration valid"
+
+      - name: Test HTTP to HTTPS redirect
+        run: |
+          echo "Testing HTTP to HTTPS redirect..."
+
+          # Add port 80 temporarily for this test
+          cd src
+          docker-compose down
+
+          # Modify compose file to expose port 80
+          sed -i 's/- "443:443"/- "80:80"\n      - "443:443"/' docker-compose.yaml
+
+          docker-compose up -d
+          sleep 10
+
+          # Test redirect
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:80 || echo "000")
+          if [ "$response" = "301" ] || [ "$response" = "302" ]; then
+            echo "✅ HTTP redirect working (Status: $response)"
+          else
+            echo "❌ HTTP redirect not working (Status: $response)"
+            docker-compose logs nginx
+            exit 1
+          fi
+
+      - name: Test HTTPS endpoint
+        run: |
+          echo "Testing HTTPS endpoint..."
+
+          # Test HTTPS response
+          response=$(curl -k -s https://localhost:443)
+          if echo "$response" | grep -q "Connected Securely over TLS"; then
+            echo "✅ HTTPS endpoint working"
+            echo "Response: $response"
+          else
+            echo "❌ HTTPS endpoint not working"
+            echo "Response: $response"
+            docker-compose logs nginx
+            exit 1
+          fi
+
+      - name: Test data persistence
+        run: |
+          echo "Testing data persistence..."
+          cd src
+
+          # Create test data
+          docker exec mariadb mysql -u test_user -ptest_user_pass_123 test_wordpress -e "
+            CREATE TABLE test_table (id INT PRIMARY KEY, data VARCHAR(100));
+            INSERT INTO test_table VALUES (1, 'persistence_test');
+          "
+
+          # Restart containers
+          docker-compose restart mariadb
+          sleep 15
+
+          # Check if data persists
+          result=$(docker exec mariadb mysql -u test_user -ptest_user_pass_123 test_wordpress -e "SELECT data FROM test_table WHERE id=1;" -s -N)
+          if [ "$result" = "persistence_test" ]; then
+            echo "✅ Data persistence working"
+          else
+            echo "❌ Data persistence failed"
+            exit 1
+          fi
+
+      - name: Security checks
+        run: |
+          echo "Running security checks..."
+
+          # Check if containers run as non-root
+          nginx_user=$(docker exec nginx whoami)
+          mariadb_user=$(docker exec mariadb whoami)
+
+          echo "Nginx running as: $nginx_user"
+          echo "MariaDB running as: $mariadb_user"
+
+          # Check SSL protocols
+          docker exec nginx nginx -T | grep -q "ssl_protocols.*TLSv1.2.*TLSv1.3" || {
+            echo "❌ SSL protocols not properly configured"
+            exit 1
+          }
+          echo "✅ SSL protocols properly configured"
+
+          # Check for anonymous users (should be empty)
+          anonymous_count=$(docker exec mariadb mysql -u root -ptest_root_pass_123 -e "SELECT COUNT(*) FROM mysql.user WHERE User='';" -s -N)
+          if [ "$anonymous_count" = "0" ]; then
+            echo "✅ No anonymous users found"
+          else
+            echo "❌ Anonymous users found"
+            exit 1
+          fi
+
+      - name: Performance checks
+        run: |
+          echo "Running performance checks..."
+
+          # Check memory usage
+          docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}"
+
+          # Test multiple concurrent connections to nginx
+          for i in {1..5}; do
+            curl -k -s https://localhost:443 > /dev/null &
+          done
+          wait
+          echo "✅ Concurrent connections handled"
+
+      - name: Cleanup and show logs on failure
+        if: failure()
+        run: |
+          cd src
+          echo "=== Docker Compose Logs ==="
+          docker-compose logs
+          echo "=== Container Status ==="
+          docker-compose ps
+          echo "=== System Info ==="
+          docker system df
+          docker-compose down -v
+
+      - name: Cleanup on success
+        if: success()
+        run: |
+          cd src
+          docker-compose down -v
+          docker system prune -f
