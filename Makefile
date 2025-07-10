@@ -2,6 +2,7 @@
 DC=docker-compose
 NAME=inception
 COMPOSEPATH=./src/docker-compose.yaml
+
 all:
 	$(DC) -f $(COMPOSEPATH) -p $(NAME) build 
 	@make up
@@ -11,8 +12,7 @@ up:
 down:
 	$(DC) -f $(COMPOSEPATH) down -v
 fclean: down
-	docker container prune
-
+	@docker system prune -a -f --volumes
 re: down up
 
 hardre: fclean all 
