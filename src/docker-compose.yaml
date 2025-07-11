@@ -4,10 +4,15 @@ services:
       context: ./nginx/
     container_name: nginx
     ports:
+      - "80:80"
       - "443:443"
     restart: unless-stopped
     depends_on:
       - mariadb
+    volumes:
+      - wordpress_data:/var/www/html
+    networks:
+      - inception_network
   mariadb:
     build:
       context: ./mariaDB/
@@ -22,6 +27,8 @@ services:
     volumes:
       - mariadb_data:/var/lib/mysql
     restart: unless-stopped
+    networks:
+      - inception_network
   wordpress:
     build:
       context: ./wordpress/
@@ -39,6 +46,13 @@ services:
       - mariadb
       - nginx
     restart: unless-stopped
+    networks:
+      - inception_network
+
 volumes:
   mariadb_data:
   wordpress_data:
+
+networks:
+  inception_network:
+    driver: bridge

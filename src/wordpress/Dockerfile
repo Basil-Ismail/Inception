@@ -24,6 +24,7 @@ RUN curl -O https://wordpress.org/latest.tar.gz && \
     tar -xzf latest.tar.gz --strip-components=1 && \
     rm latest.tar.gz
 
+# Create www-data user if it doesn't exist
 RUN if ! getent group www-data > /dev/null 2>&1; then \
     addgroup -g 82 www-data; \
     fi && \
@@ -31,16 +32,20 @@ RUN if ! getent group www-data > /dev/null 2>&1; then \
     adduser -u 82 -D -S -G www-data www-data; \
     fi
 
-RUN mkdir -p /run/php
+# Create only necessary directories
+RUN mkdir -p /run/php && \
+    chown -R www-data:www-data /run/php
 
-RUN chown -R nobody:nobody /var/www/html && \
-    chmod -R 755 /var/www/html
+# Copy configuration files
 COPY wp-config.php /var/www/html/wp-config.php
-COPY www.conf /etc/php8/php-fpm.d/www.conf
+COPY www.conf /etc/php82/php-fpm.d/www.conf
 
-
-USER www-data
+# Set proper ownership for all WordPress files
+RUN chown -R www-data:www-data /var/www/html && \
+    chmod -R 755 /var/www/html
 
 EXPOSE 9000
+
+USER www-data
 
 CMD ["php-fpm82", "-F"]
