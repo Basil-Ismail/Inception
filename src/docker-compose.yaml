@@ -22,6 +22,23 @@ services:
     volumes:
       - mariadb_data:/var/lib/mysql
     restart: unless-stopped
+  wordpress:
+    build:
+      context: ./wordpress/
+    container_name: wordpress
+    environment:
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - WORDPRESS_DB_HOST=mariadb:3306
+      - WORDPRESS_DB_PORT=3306
 
+    volumes:
+      - wordpress_data:/var/www/html
+    depends_on:
+      - mariadb
+      - nginx
+    restart: unless-stopped
 volumes:
   mariadb_data:
+  wordpress_data:
