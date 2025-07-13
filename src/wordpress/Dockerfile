@@ -12,7 +12,8 @@ RUN if ! getent group www-data > /dev/null 2>&1; then \
     adduser -u 82 -D -S -G www-data www-data; \
     fi
 
-RUN mkdir -p /var/www/html /run/php
+RUN mkdir -p /var/www/html /run/php  /var/log/php82/ 
+
 
 WORKDIR /var/www/html
 
@@ -21,8 +22,9 @@ RUN curl -O https://wordpress.org/latest.tar.gz && \
     rm latest.tar.gz
 COPY wp-config.php /var/www/html/wp-config.php
 COPY www.conf /etc/php82/php-fpm.d/www.conf
-
-RUN chown -R www-data:www-data /var/www/html /run/php && \
+COPY index.php /var/www/html/index.php
+RUN touch /var/log/php82/error.log && \
+    chown -R www-data:www-data /var/www/html /run/php /var/log/php82 && \
     chmod -R 755 /var/www/html && \
     find /var/www/html -type d -exec chmod 755 {} \; && \
     find /var/www/html -type f -exec chmod 644 {} \; && \
