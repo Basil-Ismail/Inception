@@ -3,9 +3,17 @@ DC=docker-compose
 NAME=inception
 COMPOSEPATH=./src/docker-compose.yaml
 
-all:
+all: check_certiicates
 	$(DC) -f $(COMPOSEPATH) -p $(NAME) build 
 	@make up
+
+check_certiicates:
+	@if [ ! -f ./src/nginx/certs/server.crt ] || [ ! -f ./src/nginx/certs/server.key ]; then \
+		echo "Certificates not found. I'll generate them first."; \
+		chmod +x ./src/nginx/certi_dummy_gen.sh; \
+		./src/nginx/certi_dummy_gen.sh; \
+	fi
+
 up:
 	$(DC) -f $(COMPOSEPATH) up -d 
 
