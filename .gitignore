@@ -9,7 +9,6 @@ docker-compose.override.yml
 **/logs/
 
 # Environment files
-.env
 .env.local
 .env.*.local
 
