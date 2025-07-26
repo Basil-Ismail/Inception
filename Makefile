@@ -1,7 +1,7 @@
 
 DC=docker-compose
 NAME=inception
-COMPOSEPATH=./src/docker-compose.yaml
+COMPOSEPATH=src/docker-compose.yaml
 
 all: check_certiicates
 	$(DC) -f $(COMPOSEPATH) -p $(NAME) build 
